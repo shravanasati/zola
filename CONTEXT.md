@@ -55,3 +55,19 @@ _Avoid_: ANSI color codes (prefer SGR when discussing Presenter output)
 **Color mode**:
 Presenter setting: `mono` (glyphs only) or `truecolor` (24-bit SGR). Default is mono.
 _Avoid_: color depth, palette mode (until ansi256/16 land)
+
+**PCM**:
+Interleaved linear S16 audio samples ready for the audio device, produced by FFmpeg decode + libswresample. Not compressed packets.
+_Avoid_: audio packets, samples (ambiguous)
+
+**Audio clock**:
+Master timebase for A/V sync when audio is playing: samples consumed by the device divided by sample rate. Falls back to the Engine wall clock when muted or no audio stream exists.
+_Avoid_: playback time, media time
+
+**Audio output**:
+Device backend that consumes PCM. v1 uses miniaudio; the Engine only sees `AudioOutput` open/start/stop and a shared `PcmRing`.
+_Avoid_: sound card, ALSA, Pulse (implementation details)
+
+**Mute**:
+No audio output. The decode path may still run or skip; the device must not play. `--mute` keeps the wall-clock/FPS timing path.
+_Avoid_: silent, no-sound

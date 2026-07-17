@@ -5,7 +5,7 @@ High-performance **ASCII media engine** in modern C++. Render images and play vi
 ## Requirements
 
 - C++23 compiler (GCC 12+ or Clang 16+)
-- FFmpeg development libraries: `libavformat`, `libavcodec`, `libswscale`, `libavutil`
+- FFmpeg development libraries: `libavformat`, `libavcodec`, `libswscale`, `libswresample`, `libavutil`
 - Linux / POSIX terminal
 
 ### Fedora / RHEL
@@ -18,7 +18,7 @@ sudo dnf install gcc-c++ ffmpeg-free-devel
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install g++ libavformat-dev libavcodec-dev libswscale-dev libavutil-dev
+sudo apt install g++ libavformat-dev libavcodec-dev libswscale-dev libswresample-dev libavutil-dev
 ```
 
 ## Build
@@ -36,6 +36,11 @@ make
 
 # Silent video playback as ASCII
 ./zola play path/to/clip.mp4
+
+# Video playback with audio (when the container has audio and a device is available)
+./zola play path/to/clip.mp4
+./zola play path/to/clip.mp4 --mute        # silent, wall-clock timing
+./zola play path/to/clip.mp4 --volume 0.5
 
 # Optional sizing
 ./zola image photo.png --cols 120 --rows 40
@@ -59,6 +64,11 @@ make
 Source (image / video) → Frame { gray, optional RGB }
   → ToneMap(gray) → Mapper → Cell grid { glyph, RGB }
   → Presenter (mono | truecolor SGR)
+
+For video with audio, the container is demuxed once; video packets decode to
+Frames while audio packets decode (via libswresample) to S16 PCM and play
+through a miniaudio backend. The audio device clock drives A/V sync when
+playing; `--mute` or missing audio falls back to wall-clock FPS timing.
 ```
 
 See `AGENTS.md` and `CONTEXT.md` for contributor and domain guidance.

@@ -31,7 +31,9 @@ void print_usage(const char* argv0) {
       << "  --contrast F      Gain around mid-gray (default: 1)\n"
       << "  --gamma F         Power curve on luminance (default: 1)\n"
       << "  --auto-levels     Stretch 1st–99th percentiles to full range\n"
-      << "  --invert          Reverse glyph ramp (light backgrounds)\n";
+      << "  --invert          Reverse glyph ramp (light backgrounds)\n"
+      << "  --mute            Disable audio output (video still plays)\n"
+      << "  --volume F        Linear volume 0..1 (default: 1)\n";
 }
 
 struct Parsed {
@@ -162,6 +164,19 @@ Parsed parse_args(int argc, char** argv) {
       p.opts.tone.auto_levels = true;
     } else if (a == "--invert") {
       p.opts.invert = true;
+    } else if (a == "--mute") {
+      p.opts.mute = true;
+    } else if (a == "--volume") {
+      const char* v = need_value("--volume");
+      if (!v) {
+        return p;
+      }
+      p.opts.volume = static_cast<float>(std::strtod(v, nullptr));
+      if (p.opts.volume < 0.0f || p.opts.volume > 1.0f) {
+        p.ok = false;
+        p.error = "--volume must be between 0 and 1";
+        return p;
+      }
     } else if (a == "--help" || a == "-h") {
       p.help = true;
       return p;

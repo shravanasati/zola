@@ -76,11 +76,16 @@ public:
     return rgb_;
   }
 
+  /// Presentation timestamp in seconds from media start (0 if unset).
+  [[nodiscard]] double pts() const noexcept { return pts_; }
+  void set_pts(double pts) noexcept { pts_ = pts; }
+
 private:
   std::size_t width_ = 0;
   std::size_t height_ = 0;
   std::vector<std::uint8_t> data_;
   std::vector<std::uint8_t> rgb_;
+  double pts_ = 0.0;
 };
 
 /// One terminal character position.

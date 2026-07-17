@@ -1,6 +1,7 @@
 #pragma once
 
 #include "zola/ascii_mapper.hpp"
+#include "zola/audio_output.hpp"
 #include "zola/error.hpp"
 #include "zola/glyph_ramp.hpp"
 #include "zola/presenter.hpp"
@@ -26,6 +27,8 @@ struct EngineOptions {
   ColorMode color = ColorMode::mono;
   /// When true and color is truecolor: SGR background + foreground from Cell RGB.
   bool color_bg = false;
+  bool mute = false;
+  float volume = 1.0f;
 };
 
 /// Orchestrates Source → ToneMap → Mapper → Presenter.

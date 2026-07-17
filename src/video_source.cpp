@@ -5,13 +5,19 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libavutil/time.h>
+#include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
+
+#include "zola/audio_output.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace zola {
 namespace {
@@ -27,23 +33,36 @@ std::uint8_t luminance_u8(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
 struct VideoSource::Impl {
   std::filesystem::path path;
   AVFormatContext* fmt = nullptr;
-  AVCodecContext* codec = nullptr;
-  const AVCodec* decoder = nullptr;
+  AVCodecContext* video_codec = nullptr;
+  const AVCodec* video_decoder = nullptr;
+  AVCodecContext* audio_codec = nullptr;
+  const AVCodec* audio_decoder = nullptr;
   SwsContext* sws = nullptr;
+  SwrContext* swr = nullptr;
   AVFrame* frame = nullptr;
   AVFrame* rgb = nullptr; // swscale dest: RGB24
+  AVFrame* audio_frame = nullptr;
   AVPacket* packet = nullptr;
   int video_stream = -1;
+  int audio_stream = -1;
   std::size_t width = 0;
   std::size_t height = 0;
   double fps = 0.0;
+  AudioFormat audio_format{};
   bool opened = false;
   bool eof = false;
+  bool audio_eof = false;
+
+  // Reusable planar float buffer for swr output staging.
+  std::vector<std::uint8_t> swr_buffer;
 
   void close() noexcept {
     if (sws) {
       sws_freeContext(sws);
       sws = nullptr;
+    }
+    if (swr) {
+      swr_free(&swr);
     }
     if (rgb) {
       av_frame_free(&rgb);
@@ -51,11 +70,17 @@ struct VideoSource::Impl {
     if (frame) {
       av_frame_free(&frame);
     }
+    if (audio_frame) {
+      av_frame_free(&audio_frame);
+    }
     if (packet) {
       av_packet_free(&packet);
     }
-    if (codec) {
-      avcodec_free_context(&codec);
+    if (video_codec) {
+      avcodec_free_context(&video_codec);
+    }
+    if (audio_codec) {
+      avcodec_free_context(&audio_codec);
     }
     if (fmt) {
       avformat_close_input(&fmt);
@@ -88,6 +113,14 @@ double VideoSource::fps() const noexcept {
   return impl_ ? impl_->fps : 0.0;
 }
 
+bool VideoSource::has_audio() const noexcept {
+  return impl_ && impl_->audio_stream >= 0;
+}
+
+AudioFormat VideoSource::audio_format() const noexcept {
+  return impl_ ? impl_->audio_format : AudioFormat{};
+}
+
 VoidResult VideoSource::open() {
   if (!impl_) {
     return std::unexpected(Error::invalid_argument);
@@ -106,29 +139,29 @@ VoidResult VideoSource::open() {
   }
 
   impl_->video_stream = av_find_best_stream(impl_->fmt, AVMEDIA_TYPE_VIDEO, -1,
-                                            -1, &impl_->decoder, 0);
-  if (impl_->video_stream < 0 || !impl_->decoder) {
+                                            -1, &impl_->video_decoder, 0);
+  if (impl_->video_stream < 0 || !impl_->video_decoder) {
     impl_->close();
     return std::unexpected(Error::unsupported);
   }
 
   AVStream* stream = impl_->fmt->streams[impl_->video_stream];
-  impl_->codec = avcodec_alloc_context3(impl_->decoder);
-  if (!impl_->codec) {
+  impl_->video_codec = avcodec_alloc_context3(impl_->video_decoder);
+  if (!impl_->video_codec) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
   }
-  if (avcodec_parameters_to_context(impl_->codec, stream->codecpar) < 0) {
+  if (avcodec_parameters_to_context(impl_->video_codec, stream->codecpar) < 0) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
   }
-  if (avcodec_open2(impl_->codec, impl_->decoder, nullptr) < 0) {
+  if (avcodec_open2(impl_->video_codec, impl_->video_decoder, nullptr) < 0) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
   }
 
-  impl_->width = static_cast<std::size_t>(impl_->codec->width);
-  impl_->height = static_cast<std::size_t>(impl_->codec->height);
+  impl_->width = static_cast<std::size_t>(impl_->video_codec->width);
+  impl_->height = static_cast<std::size_t>(impl_->video_codec->height);
   if (impl_->width == 0 || impl_->height == 0) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
@@ -155,25 +188,86 @@ VoidResult VideoSource::open() {
 
   // Destination RGB24 buffer owned by rgb frame (preallocated once).
   impl_->rgb->format = AV_PIX_FMT_RGB24;
-  impl_->rgb->width = impl_->codec->width;
-  impl_->rgb->height = impl_->codec->height;
+  impl_->rgb->width = impl_->video_codec->width;
+  impl_->rgb->height = impl_->video_codec->height;
   if (av_frame_get_buffer(impl_->rgb, 32) < 0) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
   }
 
   impl_->sws =
-      sws_getContext(impl_->codec->width, impl_->codec->height,
-                     impl_->codec->pix_fmt, impl_->codec->width,
-                     impl_->codec->height, AV_PIX_FMT_RGB24, SWS_BILINEAR,
+      sws_getContext(impl_->video_codec->width, impl_->video_codec->height,
+                     impl_->video_codec->pix_fmt, impl_->video_codec->width,
+                     impl_->video_codec->height, AV_PIX_FMT_RGB24, SWS_BILINEAR,
                      nullptr, nullptr, nullptr);
   if (!impl_->sws) {
     impl_->close();
     return std::unexpected(Error::decode_failure);
   }
 
+  // Optional audio stream. Failure here is not fatal — video still plays.
+  impl_->audio_stream = av_find_best_stream(impl_->fmt, AVMEDIA_TYPE_AUDIO, -1,
+                                             -1, &impl_->audio_decoder, 0);
+  if (impl_->audio_stream >= 0 && impl_->audio_decoder) {
+    AVStream* astream = impl_->fmt->streams[impl_->audio_stream];
+    impl_->audio_codec = avcodec_alloc_context3(impl_->audio_decoder);
+    if (impl_->audio_codec &&
+        avcodec_parameters_to_context(impl_->audio_codec, astream->codecpar) >= 0 &&
+        avcodec_open2(impl_->audio_codec, impl_->audio_decoder, nullptr) >= 0) {
+      // Target: S16 interleaved stereo at 48 kHz.
+      constexpr int target_rate = 48000;
+      constexpr int target_channels = 2;
+      impl_->audio_format = AudioFormat{target_rate, target_channels};
+
+      AVChannelLayout in_layout = impl_->audio_codec->ch_layout;
+      if (in_layout.nb_channels == 0) {
+        av_channel_layout_default(&in_layout, impl_->audio_codec->ch_layout.nb_channels > 0
+                                                  ? impl_->audio_codec->ch_layout.nb_channels
+                                                  : 2);
+      }
+      AVChannelLayout out_layout;
+      av_channel_layout_default(&out_layout, target_channels);
+
+      impl_->swr = swr_alloc();
+      if (impl_->swr) {
+        av_opt_set_int(impl_->swr, "in_channel_count", in_layout.nb_channels, 0);
+        av_opt_set_int(impl_->swr, "out_channel_count", target_channels, 0);
+        av_opt_set_int(impl_->swr, "in_sample_rate", impl_->audio_codec->sample_rate, 0);
+        av_opt_set_int(impl_->swr, "out_sample_rate", target_rate, 0);
+        av_opt_set_sample_fmt(impl_->swr, "in_sample_fmt", impl_->audio_codec->sample_fmt, 0);
+        av_opt_set_sample_fmt(impl_->swr, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+        av_opt_set_chlayout(impl_->swr, "in_chlayout", &in_layout, 0);
+        av_opt_set_chlayout(impl_->swr, "out_chlayout", &out_layout, 0);
+        if (swr_init(impl_->swr) < 0) {
+          swr_free(&impl_->swr);
+          impl_->audio_format = AudioFormat{};
+          impl_->audio_stream = -1;
+        }
+      } else {
+        impl_->audio_format = AudioFormat{};
+        impl_->audio_stream = -1;
+      }
+      av_channel_layout_uninit(&in_layout);
+      av_channel_layout_uninit(&out_layout);
+    } else {
+      if (impl_->audio_codec) {
+        avcodec_free_context(&impl_->audio_codec);
+        impl_->audio_codec = nullptr;
+      }
+      impl_->audio_stream = -1;
+    }
+    if (impl_->audio_stream >= 0) {
+      impl_->audio_frame = av_frame_alloc();
+      if (!impl_->audio_frame) {
+        impl_->close();
+        return std::unexpected(Error::decode_failure);
+      }
+    }
+  }
+
   impl_->opened = true;
   impl_->eof = false;
+  impl_->audio_eof = false;
   return {};
 }
 
@@ -185,12 +279,12 @@ Result<bool> VideoSource::next_frame(Frame& out) {
     return std::unexpected(Error::end_of_stream);
   }
 
-  auto convert_to_out = [&](AVFrame* decoded) -> VoidResult {
+  auto convert_to_out = [&](AVFrame* decoded, AVStream* vstream) -> VoidResult {
     if (av_frame_make_writable(impl_->rgb) < 0) {
       return std::unexpected(Error::decode_failure);
     }
     sws_scale(impl_->sws, decoded->data, decoded->linesize, 0,
-              impl_->codec->height, impl_->rgb->data, impl_->rgb->linesize);
+              impl_->video_codec->height, impl_->rgb->data, impl_->rgb->linesize);
 
     out.ensure_size(impl_->width, impl_->height);
     out.ensure_color();
@@ -215,15 +309,18 @@ Result<bool> VideoSource::next_frame(Frame& out) {
         gray_row[x] = luminance_u8(r, g, b);
       }
     }
+    if (decoded->pts != AV_NOPTS_VALUE) {
+      out.set_pts(static_cast<double>(decoded->pts) * av_q2d(vstream->time_base));
+    }
     return {};
   };
 
   // Drain / read until we get one video frame.
+  AVStream* vstream = impl_->fmt->streams[impl_->video_stream];
   for (;;) {
-    // Try receive first (handles buffered frames).
-    const int rec = avcodec_receive_frame(impl_->codec, impl_->frame);
+    const int rec = avcodec_receive_frame(impl_->video_codec, impl_->frame);
     if (rec == 0) {
-      auto conv = convert_to_out(impl_->frame);
+      auto conv = convert_to_out(impl_->frame, vstream);
       av_frame_unref(impl_->frame);
       if (!conv) {
         return std::unexpected(conv.error());
@@ -242,10 +339,10 @@ Result<bool> VideoSource::next_frame(Frame& out) {
     const int rr = av_read_frame(impl_->fmt, impl_->packet);
     if (rr < 0) {
       // Flush decoder.
-      avcodec_send_packet(impl_->codec, nullptr);
-      const int rec2 = avcodec_receive_frame(impl_->codec, impl_->frame);
+      avcodec_send_packet(impl_->video_codec, nullptr);
+      const int rec2 = avcodec_receive_frame(impl_->video_codec, impl_->frame);
       if (rec2 == 0) {
-        auto conv = convert_to_out(impl_->frame);
+        auto conv = convert_to_out(impl_->frame, vstream);
         av_frame_unref(impl_->frame);
         if (!conv) {
           return std::unexpected(conv.error());
@@ -256,16 +353,134 @@ Result<bool> VideoSource::next_frame(Frame& out) {
       return std::unexpected(Error::end_of_stream);
     }
 
-    if (impl_->packet->stream_index != impl_->video_stream) {
+    if (impl_->packet->stream_index == impl_->video_stream) {
+      if (avcodec_send_packet(impl_->video_codec, impl_->packet) < 0) {
+        av_packet_unref(impl_->packet);
+        return std::unexpected(Error::decode_failure);
+      }
+    } else if (impl_->packet->stream_index == impl_->audio_stream) {
+      // Audio packets are handled by pump_audio(); skip here.
+    }
+    av_packet_unref(impl_->packet);
+  }
+}
+
+VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
+  if (!impl_ || !impl_->opened || impl_->audio_stream < 0 || !impl_->audio_codec ||
+      !impl_->swr || impl_->audio_eof) {
+    return {};
+  }
+
+  auto resample_and_write = [&](AVFrame* decoded) -> VoidResult {
+    const int out_samples = swr_get_out_samples(impl_->swr, decoded->nb_samples);
+    if (out_samples <= 0) {
+      return {};
+    }
+    const std::size_t need_bytes = static_cast<std::size_t>(out_samples) *
+                                   impl_->audio_format.channels *
+                                   sizeof(std::int16_t);
+    if (impl_->swr_buffer.size() < need_bytes) {
+      impl_->swr_buffer.resize(need_bytes);
+    }
+
+    std::uint8_t* out_planes[1] = {impl_->swr_buffer.data()};
+    const int got = swr_convert(impl_->swr, out_planes, out_samples,
+                                const_cast<const std::uint8_t**>(decoded->data),
+                                decoded->nb_samples);
+    if (got < 0) {
+      return std::unexpected(Error::decode_failure);
+    }
+    if (got > 0) {
+      ring.write(std::span(
+          reinterpret_cast<const std::int16_t*>(impl_->swr_buffer.data()),
+          static_cast<std::size_t>(got) * impl_->audio_format.channels));
+    }
+    return {};
+  };
+
+  // Drain any already-decoded audio frames first.
+  for (;;) {
+    const int rec = avcodec_receive_frame(impl_->audio_codec, impl_->audio_frame);
+    if (rec == 0) {
+      auto conv = resample_and_write(impl_->audio_frame);
+      av_frame_unref(impl_->audio_frame);
+      if (!conv) {
+        return std::unexpected(conv.error());
+      }
+      continue;
+    }
+    if (rec == AVERROR_EOF) {
+      impl_->audio_eof = true;
+      return {};
+    }
+    if (rec != AVERROR(EAGAIN)) {
+      return std::unexpected(Error::decode_failure);
+    }
+    break;
+  }
+
+  // Read packets until an audio packet is found or EOF.
+  for (;;) {
+    const int rr = av_read_frame(impl_->fmt, impl_->packet);
+    if (rr < 0) {
+      avcodec_send_packet(impl_->audio_codec, nullptr);
+      for (;;) {
+        const int rec = avcodec_receive_frame(impl_->audio_codec, impl_->audio_frame);
+        if (rec == 0) {
+          auto conv = resample_and_write(impl_->audio_frame);
+          av_frame_unref(impl_->audio_frame);
+          if (!conv) {
+            return std::unexpected(conv.error());
+          }
+          continue;
+        }
+        if (rec == AVERROR_EOF) {
+          impl_->audio_eof = true;
+          return {};
+        }
+        if (rec != AVERROR(EAGAIN)) {
+          return std::unexpected(Error::decode_failure);
+        }
+        break;
+      }
+      impl_->audio_eof = true;
+      return {};
+    }
+
+    if (impl_->packet->stream_index != impl_->audio_stream) {
       av_packet_unref(impl_->packet);
       continue;
     }
 
-    if (avcodec_send_packet(impl_->codec, impl_->packet) < 0) {
+    if (avcodec_send_packet(impl_->audio_codec, impl_->packet) < 0) {
       av_packet_unref(impl_->packet);
       return std::unexpected(Error::decode_failure);
     }
     av_packet_unref(impl_->packet);
+
+    // Try to receive at least one frame from this packet.
+    for (;;) {
+      const int rec = avcodec_receive_frame(impl_->audio_codec, impl_->audio_frame);
+      if (rec == 0) {
+        auto conv = resample_and_write(impl_->audio_frame);
+        av_frame_unref(impl_->audio_frame);
+        if (!conv) {
+          return std::unexpected(conv.error());
+        }
+        continue;
+      }
+      if (rec == AVERROR_EOF) {
+        impl_->audio_eof = true;
+        return {};
+      }
+      if (rec == AVERROR(EAGAIN)) {
+        break;
+      }
+      return std::unexpected(Error::decode_failure);
+    }
+
+    // Stop after one audio packet so the caller can also pump video.
+    return {};
   }
 }
 

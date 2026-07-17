@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <iostream>
 #include <thread>
 
 #include <sys/select.h>
@@ -130,13 +131,36 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
     return guard.status();
   }
 
+  // Audio path: open device when stream exists and not muted. Device open
+  // failure is soft — log and continue silent.
+  AudioOutput audio;
+  const bool use_audio = source.has_audio() && !opts_.mute;
+  if (use_audio) {
+    if (auto r = audio.open(source.audio_format()); !r) {
+      std::cerr << "zola: audio device unavailable, continuing silent\n";
+    } else {
+      audio.start();
+    }
+  }
+
   SignalGuard signals;
   auto next_deadline = std::chrono::steady_clock::now();
   const bool do_color = map_color();
+  const bool audio_clock = audio.is_open();
+  const double sample_rate = audio_clock
+                                 ? static_cast<double>(source.audio_format().sample_rate)
+                                 : 0.0;
+  const int channels = audio_clock ? source.audio_format().channels : 0;
 
   for (;;) {
     if (g_interrupted.load(std::memory_order_relaxed)) {
       break;
+    }
+
+    if (use_audio) {
+      if (auto pa = source.pump_audio(audio.ring()); !pa) {
+        // Audio decode failure is not fatal; keep video playing.
+      }
     }
 
     auto got = source.next_frame(frame_);
@@ -153,21 +177,47 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
       return r;
     }
 
-    next_deadline +=
-        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            frame_duration);
-    const auto now = std::chrono::steady_clock::now();
-    if (next_deadline > now) {
-      std::this_thread::sleep_until(next_deadline);
+    // Master clock: audio position when playing; wall clock when muted/no audio.
+    double clock_seconds = 0.0;
+    if (audio_clock && sample_rate > 0.0 && channels > 0) {
+      clock_seconds =
+          static_cast<double>(audio.samples_played()) / (sample_rate * channels);
     } else {
-      // Behind schedule: drop time debt so we don't spiral (skip sleep).
-      // Optionally snap deadline forward if very late.
-      if (now - next_deadline > frame_duration * 3) {
-        next_deadline = now;
+      clock_seconds =
+          std::chrono::duration<double>(
+              std::chrono::steady_clock::now().time_since_epoch())
+              .count();
+    }
+
+    // Frame PTS is in seconds from container start; compare to clock.
+    const double pts_seconds = frame_.pts();
+    if (audio_clock && pts_seconds > 0.0) {
+      const double ahead = pts_seconds - clock_seconds;
+      if (ahead > 0.0) {
+        std::this_thread::sleep_for(std::chrono::duration<double>(ahead));
+      } else if (-ahead > 2.0 / fps) {
+        // Video is late: skip accumulating sleep debt so we catch up.
+        next_deadline = std::chrono::steady_clock::now();
+      }
+    } else {
+      // Wall-clock / FPS timing when no audio.
+      next_deadline +=
+          std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+              frame_duration);
+      const auto now = std::chrono::steady_clock::now();
+      if (next_deadline > now) {
+        std::this_thread::sleep_until(next_deadline);
+      } else {
+        // Behind schedule: drop time debt so we don't spiral (skip sleep).
+        // Optionally snap deadline forward if very late.
+        if (now - next_deadline > frame_duration * 3) {
+          next_deadline = now;
+        }
       }
     }
   }
 
+  audio.stop();
   return {};
 }
 

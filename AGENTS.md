@@ -17,11 +17,11 @@ It renders images and plays videos as ASCII art in the terminal.
 - [x] Domain docs: `CONTEXT.md`, this file
 
 **Brightness / ToneMap is landed.** **Color v1 is landed** (truecolor + mono).
+**Audio v1 is landed.**
 ToneMap stays the luminance path for glyph choice under color; do not regress mono.
 Optional color follow-ups: ansi256/16, chroma tone, half-blocks (color slice 6).
 
-**Next work: audio** (plan below). Silent video remains the default when muted
-or when the container has no audio stream.
+**Status: v1.1 audio is complete.**
 
 ## Non-goals (still deferred)
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "zola/audio_output.hpp"
+#include "zola/pcm_ring.hpp"
 #include "zola/source.hpp"
 
 #include <filesystem>
@@ -7,7 +9,8 @@
 
 namespace zola {
 
-/// Silent video Source using FFmpeg (libav*). Yields grayscale Frames.
+/// Video Source using FFmpeg (libav*). Yields grayscale Frames and optionally
+/// decodes container audio into a PcmRing.
 class VideoSource final : public Source {
 public:
   explicit VideoSource(std::filesystem::path path);
@@ -24,6 +27,13 @@ public:
   [[nodiscard]] std::size_t width() const noexcept override;
   [[nodiscard]] std::size_t height() const noexcept override;
   [[nodiscard]] double fps() const noexcept override;
+
+  [[nodiscard]] bool has_audio() const noexcept;
+  [[nodiscard]] AudioFormat audio_format() const noexcept;
+
+  /// Decode and enqueue any available audio packets into ring. Called by Engine
+  /// to keep the audio device fed. Safe to call when has_audio() is false.
+  VoidResult pump_audio(PcmRing& ring) noexcept;
 
 private:
   struct Impl;
