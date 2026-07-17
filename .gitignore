@@ -1,0 +1,16 @@
+# Build
+*.o
+/zola
+/src/*.o
+
+# Local media samples (keep small png if desired)
+assets/*.mp4
+assets/*.mkv
+assets/*.webm
+assets/*.mov
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
+.cache/
