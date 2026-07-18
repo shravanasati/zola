@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 namespace zola {
@@ -110,6 +111,7 @@ VoidResult Presenter::begin(bool use_alt_screen) {
 
   active_ = true;
   first_frame_ = true;
+  enable_raw_mode();
   return {};
 }
 
@@ -117,6 +119,7 @@ void Presenter::end() noexcept {
   if (!active_) {
     return;
   }
+  disable_raw_mode();
   // Show cursor; leave alt screen if entered.
   std::fputs("\033[?25h", stdout);
   if (alt_screen_) {
@@ -134,6 +137,28 @@ Result<TerminalSize> Presenter::query_size() {
     return TerminalSize{ws.ws_col, ws.ws_row};
   }
   return TerminalSize{80, 24};
+}
+
+void Presenter::enable_raw_mode() {
+  if (raw_mode_active_ || !isatty(STDIN_FILENO)) {
+    return;
+  }
+  tcgetattr(STDIN_FILENO, &original_termios_);
+  termios raw = original_termios_;
+  raw.c_lflag &= ~(ECHO | ICANON | ISIG);
+  raw.c_iflag &= ~(IXON | ICRNL);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 0;
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+  raw_mode_active_ = true;
+}
+
+void Presenter::disable_raw_mode() noexcept {
+  if (!raw_mode_active_ || !isatty(STDIN_FILENO)) {
+    return;
+  }
+  tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios_);
+  raw_mode_active_ = false;
 }
 
 VoidResult Presenter::present(const CellGrid& grid) {

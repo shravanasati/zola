@@ -34,6 +34,12 @@ public:
   /// Start the device callback (pulling from the ring supplied at open).
   void start();
 
+  /// Suspend the device callback without tearing down the device/context.
+  void pause() noexcept;
+
+  /// Resume a paused device callback.
+  void resume() noexcept;
+
   /// Stop and close the device. Safe to call multiple times; noexcept because
   /// this is used in teardown / SIGINT paths.
   void stop() noexcept;
@@ -48,6 +54,9 @@ public:
   [[nodiscard]] const PcmRing& ring() const noexcept { return ring_; }
 
   void add_samples_played(std::size_t n) noexcept;
+
+  /// Reset the samples-played counter to an absolute position (used after seek).
+  void set_samples_played(std::size_t n) noexcept;
 
 private:
   struct Impl;

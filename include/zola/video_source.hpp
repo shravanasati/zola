@@ -35,6 +35,12 @@ public:
   /// to keep the audio device fed. Safe to call when has_audio() is false.
   VoidResult pump_audio(PcmRing& ring) noexcept;
 
+  /// Seek to the given time (seconds from start). Flushes both decoders.
+  VoidResult seek(double seconds);
+
+  /// Container duration in seconds, or 0 if unknown.
+  [[nodiscard]] double duration() const noexcept;
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

@@ -4,6 +4,7 @@
 #include "zola/logger.hpp"
 #include "zola/video_source.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -29,6 +30,48 @@ struct SignalGuard {
 };
 
 } // namespace
+
+Key Engine::read_key() noexcept {
+  if (!isatty(STDIN_FILENO)) {
+    return Key::none;
+  }
+
+  fd_set fds;
+  FD_ZERO(&fds);
+  FD_SET(STDIN_FILENO, &fds);
+  timeval tv{0, 0};
+  if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &tv) <= 0) {
+    return Key::none;
+  }
+
+  unsigned char buf[3] = {};
+  const ssize_t n = ::read(STDIN_FILENO, buf, sizeof(buf));
+  if (n <= 0) {
+    return Key::none;
+  }
+
+  if (buf[0] == 'q' || buf[0] == 0x1b) {
+    if (n == 1) {
+      return Key::quit;
+    }
+    if (buf[1] == '[' && n >= 3) {
+      switch (buf[2]) {
+      case 'C':
+        return Key::seek_fwd;
+      case 'D':
+        return Key::seek_back;
+      default:
+        return Key::quit;
+      }
+    }
+    return Key::quit;
+  }
+  if (buf[0] == ' ' || buf[0] == '\n' || buf[0] == '\r') {
+    return Key::space;
+  }
+
+  return Key::none;
+}
 
 Engine::Engine(EngineOptions opts)
     : opts_(std::move(opts)), tone_(opts_.tone), mapper_(opts_.ramp) {
@@ -151,10 +194,64 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
                                  ? static_cast<double>(source.audio_format().sample_rate)
                                  : 0.0;
   const int channels = audio_clock ? source.audio_format().channels : 0;
+  bool paused = false;
+  auto pause_start = std::chrono::steady_clock::time_point{};
+  auto pause_accumulated = std::chrono::steady_clock::duration{};
+  double current_pts = 0.0;
 
   for (;;) {
     if (g_interrupted.load(std::memory_order_relaxed)) {
       break;
+    }
+
+    // Key dispatch.
+    const Key key = read_key();
+    if (key == Key::quit) {
+      break;
+    }
+    if (key == Key::space) {
+      if (paused) {
+        // Resume.
+        pause_accumulated += std::chrono::steady_clock::now() - pause_start;
+        if (audio.is_open()) {
+          audio.ring().clear();
+          audio.resume();
+        }
+        next_deadline = std::chrono::steady_clock::now();
+        paused = false;
+      } else {
+        // Pause.
+        paused = true;
+        pause_start = std::chrono::steady_clock::now();
+        if (audio.is_open()) {
+          audio.pause();
+        }
+      }
+    }
+    if (key == Key::seek_fwd || key == Key::seek_back) {
+      const double delta = (key == Key::seek_fwd) ? 5.0 : -5.0;
+      double target = current_pts + delta;
+      const double dur = source.duration();
+      if (dur > 0.0) {
+        target = std::clamp(target, 0.0, dur);
+      } else {
+        target = std::max(target, 0.0);
+      }
+      if (auto sr = source.seek(target); !sr) {
+        return std::unexpected(sr.error());
+      }
+      if (audio_clock) {
+        audio.ring().clear();
+        const auto target_samples = static_cast<std::size_t>(
+            target * sample_rate * channels);
+        audio.set_samples_played(target_samples);
+      }
+      next_deadline = std::chrono::steady_clock::now();
+    }
+
+    if (paused) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      continue;
     }
 
     if (use_audio) {
@@ -176,6 +273,7 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
     if (auto r = presenter_.present(grid_); !r) {
       return r;
     }
+    current_pts = frame_.pts();
 
     // Master clock: audio position when playing; wall clock when muted/no audio.
     double clock_seconds = 0.0;
@@ -183,10 +281,10 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
       clock_seconds =
           static_cast<double>(audio.samples_played()) / (sample_rate * channels);
     } else {
+      const auto effective_now =
+          std::chrono::steady_clock::now() - pause_accumulated;
       clock_seconds =
-          std::chrono::duration<double>(
-              std::chrono::steady_clock::now().time_since_epoch())
-              .count();
+          std::chrono::duration<double>(effective_now.time_since_epoch()).count();
     }
 
     // Frame PTS is in seconds from container start; compare to clock.

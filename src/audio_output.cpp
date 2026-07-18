@@ -99,6 +99,20 @@ void AudioOutput::start() {
   ma_device_start(&impl_->device);
 }
 
+void AudioOutput::pause() noexcept {
+  if (!impl_->device_initialized) {
+    return;
+  }
+  ma_device_stop(&impl_->device);
+}
+
+void AudioOutput::resume() noexcept {
+  if (!impl_->device_initialized) {
+    return;
+  }
+  ma_device_start(&impl_->device);
+}
+
 void AudioOutput::stop() noexcept {
   if (impl_->device_initialized) {
     ma_device_stop(&impl_->device);
@@ -119,6 +133,10 @@ std::size_t AudioOutput::samples_played() const noexcept {
 
 void AudioOutput::add_samples_played(std::size_t n) noexcept {
   samples_played_.fetch_add(n, std::memory_order_relaxed);
+}
+
+void AudioOutput::set_samples_played(std::size_t n) noexcept {
+  samples_played_.store(n, std::memory_order_relaxed);
 }
 
 } // namespace zola

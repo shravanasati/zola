@@ -7,6 +7,8 @@
 #include <string>
 #include <utility>
 
+#include <termios.h>
+
 namespace zola {
 
 /// Terminal size in character cells.
@@ -57,6 +59,11 @@ public:
   /// Present a full cell grid. First frame may clear; subsequent use home.
   VoidResult present(const CellGrid& grid);
 
+  /// Enter raw terminal mode (non-canonical, no echo) for key reading.
+  void enable_raw_mode();
+  /// Restore terminal to the state saved by enable_raw_mode().
+  void disable_raw_mode() noexcept;
+
 private:
   bool active_ = false;
   bool alt_screen_ = false;
@@ -64,6 +71,8 @@ private:
   ColorMode color_mode_ = ColorMode::mono;
   bool color_bg_ = false;
   std::string write_buf_;
+  termios original_termios_{};
+  bool raw_mode_active_ = false;
 };
 
 /// RAII guard that always restores the terminal.

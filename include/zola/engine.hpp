@@ -13,6 +13,15 @@
 
 namespace zola {
 
+/// Physical keys recognized during playback.
+enum class Key {
+  none,
+  quit,       ///< q or Esc (bare)
+  space,      ///< Space / Enter
+  seek_fwd,   ///< Right arrow (+5s)
+  seek_back,  ///< Left arrow (-5s)
+};
+
 struct EngineOptions {
   /// 0 = use full terminal dimension.
   std::size_t cols = 0;
@@ -51,6 +60,10 @@ private:
 
   void resolve_output_size(std::size_t src_w, std::size_t src_h,
                            std::size_t& cols, std::size_t& rows) const;
+
+  /// Non-blocking read of a single key from stdin. Returns Key::none when no
+  /// key is available.
+  [[nodiscard]] static Key read_key() noexcept;
 
   [[nodiscard]] bool map_color() const noexcept {
     return opts_.color != ColorMode::mono;

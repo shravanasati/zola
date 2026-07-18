@@ -500,4 +500,34 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
   }
 }
 
+VoidResult VideoSource::seek(double seconds) {
+  if (!impl_ || !impl_->opened) {
+    return std::unexpected(Error(ErrorKind::invalid_argument));
+  }
+
+  const auto target = static_cast<std::int64_t>(seconds * AV_TIME_BASE);
+  const int rc = av_seek_frame(impl_->fmt, -1, target, AVSEEK_FLAG_BACKWARD);
+  if (rc < 0) {
+    return std::unexpected(Error(ErrorKind::ffmpeg_error));
+  }
+
+  avcodec_flush_buffers(impl_->video_codec);
+  if (impl_->audio_codec) {
+    avcodec_flush_buffers(impl_->audio_codec);
+  }
+  impl_->eof = false;
+  impl_->audio_eof = false;
+  return {};
+}
+
+double VideoSource::duration() const noexcept {
+  if (!impl_ || !impl_->fmt) {
+    return 0.0;
+  }
+  if (impl_->fmt->duration == AV_NOPTS_VALUE) {
+    return 0.0;
+  }
+  return static_cast<double>(impl_->fmt->duration) / AV_TIME_BASE;
+}
+
 } // namespace zola
