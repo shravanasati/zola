@@ -138,7 +138,7 @@ Result<TerminalSize> Presenter::query_size() {
 
 VoidResult Presenter::present(const CellGrid& grid) {
   if (grid.empty()) {
-    return std::unexpected(Error::invalid_argument);
+    return std::unexpected(Error(ErrorKind::invalid_argument));
   }
 
   const std::size_t cols = grid.cols();
@@ -167,10 +167,10 @@ VoidResult Presenter::present(const CellGrid& grid) {
   const auto n = static_cast<std::size_t>(
       std::fwrite(write_buf_.data(), 1, write_buf_.size(), stdout));
   if (n != write_buf_.size()) {
-    return std::unexpected(Error::io_failure);
+    return std::unexpected(Error(ErrorKind::io_failure));
   }
   if (std::fflush(stdout) != 0) {
-    return std::unexpected(Error::io_failure);
+    return std::unexpected(Error(ErrorKind::io_failure));
   }
   return {};
 }

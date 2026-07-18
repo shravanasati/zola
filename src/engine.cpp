@@ -1,12 +1,12 @@
 #include "zola/engine.hpp"
 
 #include "zola/image_source.hpp"
+#include "zola/logger.hpp"
 #include "zola/video_source.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <csignal>
-#include <iostream>
 #include <thread>
 
 #include <sys/select.h>
@@ -137,7 +137,7 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
   const bool use_audio = source.has_audio() && !opts_.mute;
   if (use_audio) {
     if (auto r = audio.open(source.audio_format()); !r) {
-      std::cerr << "zola: audio device unavailable, continuing silent\n";
+      Logger::warn("audio device unavailable, continuing silent");
     } else {
       audio.start();
     }
@@ -165,7 +165,7 @@ VoidResult Engine::play_video(const std::filesystem::path& path) {
 
     auto got = source.next_frame(frame_);
     if (!got) {
-      if (got.error() == Error::end_of_stream) {
+      if (got.error().kind == ErrorKind::end_of_stream) {
         break;
       }
       return std::unexpected(got.error());

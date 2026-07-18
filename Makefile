@@ -20,6 +20,7 @@ SRC = \
 	src/tone_map.cpp \
 	src/pcm_ring.cpp \
 	src/audio_output.cpp \
+	src/logger.cpp \
 	src/engine.cpp \
 	src/main.cpp
 

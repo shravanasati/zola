@@ -57,7 +57,7 @@ VoidResult AudioOutput::open(const AudioFormat& format) {
   stop();
 
   if (format.sample_rate <= 0 || format.channels <= 0) {
-    return std::unexpected(Error::invalid_argument);
+    return std::unexpected(Error(ErrorKind::invalid_argument));
   }
 
   format_ = format;
@@ -71,7 +71,7 @@ VoidResult AudioOutput::open(const AudioFormat& format) {
 
   ma_result res = ma_context_init(nullptr, 0, nullptr, &impl_->context);
   if (res != MA_SUCCESS) {
-    return std::unexpected(Error::io_failure);
+    return std::unexpected(Error(ErrorKind::io_failure));
   }
   impl_->context_initialized = true;
 
@@ -85,7 +85,7 @@ VoidResult AudioOutput::open(const AudioFormat& format) {
   res = ma_device_init(&impl_->context, &config, &impl_->device);
   if (res != MA_SUCCESS) {
     stop();
-    return std::unexpected(Error::io_failure);
+    return std::unexpected(Error(ErrorKind::io_failure));
   }
   impl_->device_initialized = true;
 

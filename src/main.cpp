@@ -1,5 +1,6 @@
 #include "zola/engine.hpp"
 #include "zola/error.hpp"
+#include "zola/logger.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -33,7 +34,8 @@ void print_usage(const char* argv0) {
       << "  --auto-levels     Stretch 1st–99th percentiles to full range\n"
       << "  --invert          Reverse glyph ramp (light backgrounds)\n"
       << "  --mute            Disable audio output (video still plays)\n"
-      << "  --volume F        Linear volume 0..1 (default: 1)\n";
+      << "  --volume F        Linear volume 0..1 (default: 1)\n"
+      << "  --log-level LVL   Log level: warn, error (default: warn)\n";
 }
 
 struct Parsed {
@@ -43,6 +45,7 @@ struct Parsed {
   bool help = false;
   bool ok = true;
   std::string error;
+  zola::LogLevel log_level = zola::LogLevel::warn;
 };
 
 bool parse_color_mode(std::string_view s, zola::ColorMode& out) {
@@ -166,6 +169,20 @@ Parsed parse_args(int argc, char** argv) {
       p.opts.invert = true;
     } else if (a == "--mute") {
       p.opts.mute = true;
+    } else if (a == "--log-level") {
+      const char* v = need_value("--log-level");
+      if (!v) {
+        return p;
+      }
+      if (std::string_view(v) == "warn") {
+        p.log_level = zola::LogLevel::warn;
+      } else if (std::string_view(v) == "error") {
+        p.log_level = zola::LogLevel::error;
+      } else {
+        p.ok = false;
+        p.error = std::string("unknown --log-level: ") + v + " (use warn or error)";
+        return p;
+      }
     } else if (a == "--volume") {
       const char* v = need_value("--volume");
       if (!v) {
@@ -209,6 +226,8 @@ int main(int argc, char** argv) {
     return 2;
   }
 
+  zola::Logger::init(true, p.log_level);
+
   zola::Engine engine(p.opts);
   zola::VoidResult result;
 
@@ -225,7 +244,11 @@ int main(int argc, char** argv) {
   }
 
   if (!result) {
+    zola::Logger::error(zola::to_string(result.error()));
+    zola::Logger::shutdown();
     return fail(result.error());
   }
+
+  zola::Logger::shutdown();
   return 0;
 }

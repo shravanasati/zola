@@ -1,33 +1,50 @@
 #pragma once
 
 #include <expected>
+#include <string>
 #include <string_view>
 
 namespace zola {
 
-enum class Error {
+enum class ErrorKind {
   invalid_argument,
   io_failure,
   decode_failure,
   unsupported,
   terminal_failure,
   end_of_stream,
+  ffmpeg_error,
 };
 
-inline std::string_view to_string(Error e) {
-  switch (e) {
-  case Error::invalid_argument:
+struct Error {
+  ErrorKind kind = ErrorKind::invalid_argument;
+  int ffmpeg_code = 0;
+  std::string message;
+
+  Error() = default;
+  explicit Error(ErrorKind k) : kind(k) {}
+
+  friend bool operator==(const Error& a, const Error& b) {
+    return a.kind == b.kind;
+  }
+};
+
+inline std::string to_string(const Error& e) {
+  switch (e.kind) {
+  case ErrorKind::invalid_argument:
     return "invalid argument";
-  case Error::io_failure:
+  case ErrorKind::io_failure:
     return "I/O failure";
-  case Error::decode_failure:
+  case ErrorKind::decode_failure:
     return "decode failure";
-  case Error::unsupported:
+  case ErrorKind::unsupported:
     return "unsupported";
-  case Error::terminal_failure:
+  case ErrorKind::terminal_failure:
     return "terminal failure";
-  case Error::end_of_stream:
+  case ErrorKind::end_of_stream:
     return "end of stream";
+  case ErrorKind::ffmpeg_error:
+    return "ffmpeg error " + std::to_string(e.ffmpeg_code) + ": " + e.message;
   }
   return "unknown error";
 }

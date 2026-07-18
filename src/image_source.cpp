@@ -41,7 +41,7 @@ VoidResult ImageSource::open() {
     if (pixels) {
       stbi_image_free(pixels);
     }
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   width_ = static_cast<std::size_t>(w);
@@ -69,10 +69,10 @@ VoidResult ImageSource::open() {
 
 Result<bool> ImageSource::next_frame(Frame& out) {
   if (!opened_) {
-    return std::unexpected(Error::invalid_argument);
+    return std::unexpected(Error(ErrorKind::invalid_argument));
   }
   if (consumed_) {
-    return std::unexpected(Error::end_of_stream);
+    return std::unexpected(Error(ErrorKind::end_of_stream));
   }
 
   out.ensure_size(width_, height_);

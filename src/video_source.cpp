@@ -12,6 +12,7 @@ extern "C" {
 }
 
 #include "zola/audio_output.hpp"
+#include "zola/logger.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -123,48 +124,63 @@ AudioFormat VideoSource::audio_format() const noexcept {
 
 VoidResult VideoSource::open() {
   if (!impl_) {
-    return std::unexpected(Error::invalid_argument);
+    return std::unexpected(Error(ErrorKind::invalid_argument));
   }
   if (impl_->opened) {
     return {};
   }
 
   const std::string path = impl_->path.string();
-  if (avformat_open_input(&impl_->fmt, path.c_str(), nullptr, nullptr) < 0) {
-    return std::unexpected(Error::io_failure);
+  int rc;
+  rc = avformat_open_input(&impl_->fmt, path.c_str(), nullptr, nullptr);
+  if (rc < 0) {
+    Error e(ErrorKind::ffmpeg_error);
+    e.ffmpeg_code = rc;
+    char errbuf[AV_ERROR_MAX_STRING_SIZE]{};
+    av_strerror(rc, errbuf, sizeof(errbuf));
+    e.message = errbuf;
+    Logger::error(to_string(e));
+    return std::unexpected(e);
   }
-  if (avformat_find_stream_info(impl_->fmt, nullptr) < 0) {
+  rc = avformat_find_stream_info(impl_->fmt, nullptr);
+  if (rc < 0) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    Error e(ErrorKind::ffmpeg_error);
+    e.ffmpeg_code = rc;
+    char errbuf[AV_ERROR_MAX_STRING_SIZE]{};
+    av_strerror(rc, errbuf, sizeof(errbuf));
+    e.message = errbuf;
+    Logger::error(to_string(e));
+    return std::unexpected(e);
   }
 
   impl_->video_stream = av_find_best_stream(impl_->fmt, AVMEDIA_TYPE_VIDEO, -1,
                                             -1, &impl_->video_decoder, 0);
   if (impl_->video_stream < 0 || !impl_->video_decoder) {
     impl_->close();
-    return std::unexpected(Error::unsupported);
+    return std::unexpected(Error(ErrorKind::unsupported));
   }
 
   AVStream* stream = impl_->fmt->streams[impl_->video_stream];
   impl_->video_codec = avcodec_alloc_context3(impl_->video_decoder);
   if (!impl_->video_codec) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
   if (avcodec_parameters_to_context(impl_->video_codec, stream->codecpar) < 0) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
   if (avcodec_open2(impl_->video_codec, impl_->video_decoder, nullptr) < 0) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   impl_->width = static_cast<std::size_t>(impl_->video_codec->width);
   impl_->height = static_cast<std::size_t>(impl_->video_codec->height);
   if (impl_->width == 0 || impl_->height == 0) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   // Prefer average frame rate; fall back to r_frame_rate.
@@ -183,7 +199,7 @@ VoidResult VideoSource::open() {
   impl_->packet = av_packet_alloc();
   if (!impl_->frame || !impl_->rgb || !impl_->packet) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   // Destination RGB24 buffer owned by rgb frame (preallocated once).
@@ -192,7 +208,7 @@ VoidResult VideoSource::open() {
   impl_->rgb->height = impl_->video_codec->height;
   if (av_frame_get_buffer(impl_->rgb, 32) < 0) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   impl_->sws =
@@ -202,7 +218,7 @@ VoidResult VideoSource::open() {
                      nullptr, nullptr, nullptr);
   if (!impl_->sws) {
     impl_->close();
-    return std::unexpected(Error::decode_failure);
+    return std::unexpected(Error(ErrorKind::decode_failure));
   }
 
   // Optional audio stream. Failure here is not fatal — video still plays.
@@ -260,7 +276,7 @@ VoidResult VideoSource::open() {
       impl_->audio_frame = av_frame_alloc();
       if (!impl_->audio_frame) {
         impl_->close();
-        return std::unexpected(Error::decode_failure);
+        return std::unexpected(Error(ErrorKind::decode_failure));
       }
     }
   }
@@ -273,15 +289,15 @@ VoidResult VideoSource::open() {
 
 Result<bool> VideoSource::next_frame(Frame& out) {
   if (!impl_ || !impl_->opened) {
-    return std::unexpected(Error::invalid_argument);
+    return std::unexpected(Error(ErrorKind::invalid_argument));
   }
   if (impl_->eof) {
-    return std::unexpected(Error::end_of_stream);
+    return std::unexpected(Error(ErrorKind::end_of_stream));
   }
 
   auto convert_to_out = [&](AVFrame* decoded, AVStream* vstream) -> VoidResult {
     if (av_frame_make_writable(impl_->rgb) < 0) {
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
     sws_scale(impl_->sws, decoded->data, decoded->linesize, 0,
               impl_->video_codec->height, impl_->rgb->data, impl_->rgb->linesize);
@@ -330,9 +346,9 @@ Result<bool> VideoSource::next_frame(Frame& out) {
     if (rec != AVERROR(EAGAIN)) {
       if (rec == AVERROR_EOF) {
         impl_->eof = true;
-        return std::unexpected(Error::end_of_stream);
+        return std::unexpected(Error(ErrorKind::end_of_stream));
       }
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
 
     // Need more input.
@@ -350,13 +366,13 @@ Result<bool> VideoSource::next_frame(Frame& out) {
         return true;
       }
       impl_->eof = true;
-      return std::unexpected(Error::end_of_stream);
+      return std::unexpected(Error(ErrorKind::end_of_stream));
     }
 
     if (impl_->packet->stream_index == impl_->video_stream) {
       if (avcodec_send_packet(impl_->video_codec, impl_->packet) < 0) {
         av_packet_unref(impl_->packet);
-        return std::unexpected(Error::decode_failure);
+        return std::unexpected(Error(ErrorKind::decode_failure));
       }
     } else if (impl_->packet->stream_index == impl_->audio_stream) {
       // Audio packets are handled by pump_audio(); skip here.
@@ -388,7 +404,7 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
                                 const_cast<const std::uint8_t**>(decoded->data),
                                 decoded->nb_samples);
     if (got < 0) {
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
     if (got > 0) {
       ring.write(std::span(
@@ -414,7 +430,7 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
       return {};
     }
     if (rec != AVERROR(EAGAIN)) {
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
     break;
   }
@@ -439,7 +455,7 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
           return {};
         }
         if (rec != AVERROR(EAGAIN)) {
-          return std::unexpected(Error::decode_failure);
+          return std::unexpected(Error(ErrorKind::decode_failure));
         }
         break;
       }
@@ -454,7 +470,7 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
 
     if (avcodec_send_packet(impl_->audio_codec, impl_->packet) < 0) {
       av_packet_unref(impl_->packet);
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
     av_packet_unref(impl_->packet);
 
@@ -476,7 +492,7 @@ VoidResult VideoSource::pump_audio(PcmRing& ring) noexcept {
       if (rec == AVERROR(EAGAIN)) {
         break;
       }
-      return std::unexpected(Error::decode_failure);
+      return std::unexpected(Error(ErrorKind::decode_failure));
     }
 
     // Stop after one audio packet so the caller can also pump video.
