@@ -4,8 +4,8 @@
 #include "zola/pcm_ring.hpp"
 #include "zola/source.hpp"
 
-#include <filesystem>
 #include <memory>
+#include <string>
 
 namespace zola {
 
@@ -13,7 +13,7 @@ namespace zola {
 /// decodes container audio into a PcmRing.
 class VideoSource final : public Source {
 public:
-  explicit VideoSource(std::filesystem::path path);
+  explicit VideoSource(std::string path);
   ~VideoSource() override;
 
   VideoSource(const VideoSource&) = delete;

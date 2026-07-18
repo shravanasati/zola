@@ -8,7 +8,6 @@
 #include "zola/tone_map.hpp"
 
 #include <cstddef>
-#include <filesystem>
 #include <string>
 
 namespace zola {
@@ -45,8 +44,8 @@ class Engine {
 public:
   explicit Engine(EngineOptions opts = {});
 
-  VoidResult show_image(const std::filesystem::path& path);
-  VoidResult play_video(const std::filesystem::path& path);
+  VoidResult show_image(const std::string& path);
+  VoidResult play_video(const std::string& path);
 
 private:
   EngineOptions opts_;

@@ -71,3 +71,11 @@ _Avoid_: sound card, ALSA, Pulse (implementation details)
 **Mute**:
 No audio output. The decode path may still run or skip; the device must not play. `--mute` keeps the wall-clock/FPS timing path.
 _Avoid_: silent, no-sound
+
+**URL streaming**:
+Video served over HTTP/HTTPS from a CDN, object store, or file server. FFmpeg handles the URL transparently via `avformat_open_input`; byte-range seeks use HTTP Range headers. The engine and sources see only a string, not a filesystem path.
+_Avoid_: network playback, remote video (ambiguous)
+
+**URL resolver**:
+External tool (yt-dlp) that extracts a direct stream URL from a platform page URL. Not part of the Source abstraction; it is CLI glue. Users control format selection, cookies, and geo-bypass via yt-dlp flags.
+_Avoid_: extractor, downloader (implies bundling logic)

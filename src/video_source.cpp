@@ -32,7 +32,7 @@ std::uint8_t luminance_u8(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
 } // namespace
 
 struct VideoSource::Impl {
-  std::filesystem::path path;
+  std::string path;
   AVFormatContext* fmt = nullptr;
   AVCodecContext* video_codec = nullptr;
   const AVCodec* video_decoder = nullptr;
@@ -92,7 +92,7 @@ struct VideoSource::Impl {
   ~Impl() { close(); }
 };
 
-VideoSource::VideoSource(std::filesystem::path path)
+VideoSource::VideoSource(std::string path)
     : impl_(std::make_unique<Impl>()) {
   impl_->path = std::move(path);
 }
@@ -130,9 +130,8 @@ VoidResult VideoSource::open() {
     return {};
   }
 
-  const std::string path = impl_->path.string();
   int rc;
-  rc = avformat_open_input(&impl_->fmt, path.c_str(), nullptr, nullptr);
+  rc = avformat_open_input(&impl_->fmt, impl_->path.c_str(), nullptr, nullptr);
   if (rc < 0) {
     Error e(ErrorKind::ffmpeg_error);
     e.ffmpeg_code = rc;

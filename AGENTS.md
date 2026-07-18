@@ -48,6 +48,8 @@ When audio lands, prefer these terms:
 - **Audio clock** — master timebase for A/V sync (device or Engine wall clock)
 - **Audio output** — device backend that consumes PCM (not FFmpeg decode)
 - **Mute** — decode path may still run or skip; device must not play
+- **URL streaming** — video served over HTTP/HTTPS; FFmpeg handles URL transparently
+- **URL resolver** — external tool (yt-dlp) that extracts a stream URL from a platform URL; CLI glue, not part of Source
 
 Audio is **not** part of Frame. Do not invent AudioFrame as a Frame subclass.
 

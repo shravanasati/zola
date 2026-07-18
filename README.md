@@ -90,4 +90,4 @@ See `AGENTS.md` and `CONTEXT.md` for contributor and domain guidance.
 
 ## License
 
-Project-local; add a license when you publish.
+This project is licensed under the [MIT License](./LICENSE.txt).

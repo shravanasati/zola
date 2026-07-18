@@ -106,7 +106,7 @@ void Engine::resolve_output_size(std::size_t src_w, std::size_t src_h,
   mapper_.fit_size(src_w, src_h, max_cols, fit_rows, cols, rows);
 }
 
-VoidResult Engine::show_image(const std::filesystem::path& path) {
+VoidResult Engine::show_image(const std::string& path) {
   ImageSource source(path);
   if (auto r = source.open(); !r) {
     return r;
@@ -152,7 +152,7 @@ VoidResult Engine::show_image(const std::filesystem::path& path) {
   return {};
 }
 
-VoidResult Engine::play_video(const std::filesystem::path& path) {
+VoidResult Engine::play_video(const std::string& path) {
   VideoSource source(path);
   if (auto r = source.open(); !r) {
     return r;
