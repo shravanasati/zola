@@ -14,3 +14,4 @@ assets/*.mov
 *.swp
 *~
 .cache/
+*_test

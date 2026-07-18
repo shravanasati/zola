@@ -6,7 +6,6 @@
 #include <cstring>
 #include <iostream>
 #include <string>
-#include <string_view>
 
 namespace {
 
@@ -15,9 +14,7 @@ void print_usage(const char* argv0) {
       << "zola — high-performance ASCII media engine\n\n"
       << "Usage:\n"
       << "  " << argv0
-      << " image <path> [options]\n"
-      << "  " << argv0
-      << " play  <path> [options]\n"
+      << " <path> [options]\n"
       << "  " << argv0 << " --help\n\n"
       << "Options:\n"
       << "  --cols N          Output columns (default: fit terminal)\n"
@@ -39,7 +36,6 @@ void print_usage(const char* argv0) {
 }
 
 struct Parsed {
-  enum class Cmd { none, image, play } cmd = Cmd::none;
   std::string path;
   zola::EngineOptions opts;
   bool help = false;
@@ -64,7 +60,7 @@ Parsed parse_args(int argc, char** argv) {
   Parsed p;
   if (argc < 2) {
     p.ok = false;
-    p.error = "missing command";
+    p.error = "missing path";
     return p;
   }
 
@@ -74,23 +70,9 @@ Parsed parse_args(int argc, char** argv) {
     p.help = true;
     return p;
   }
-  if (a1 == "image") {
-    p.cmd = Parsed::Cmd::image;
-  } else if (a1 == "play") {
-    p.cmd = Parsed::Cmd::play;
-  } else {
-    p.ok = false;
-    p.error = "unknown command (use image or play)";
-    return p;
-  }
 
-  if (argc < 3) {
-    p.ok = false;
-    p.error = "missing path";
-    return p;
-  }
-  p.path = argv[2];
-  i = 3;
+  p.path = argv[1];
+  i = 2;
 
   auto need_value = [&](const char* flag) -> const char* {
     if (i + 1 >= argc) {
@@ -229,19 +211,7 @@ int main(int argc, char** argv) {
   zola::Logger::init(true, p.log_level);
 
   zola::Engine engine(p.opts);
-  zola::VoidResult result;
-
-  switch (p.cmd) {
-  case Parsed::Cmd::image:
-    result = engine.show_image(p.path);
-    break;
-  case Parsed::Cmd::play:
-    result = engine.play_video(p.path);
-    break;
-  default:
-    print_usage(argv[0]);
-    return 2;
-  }
+  zola::VoidResult result = engine.play(p.path);
 
   if (!result) {
     zola::Logger::error(zola::to_string(result.error()));

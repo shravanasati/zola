@@ -24,7 +24,7 @@ namespace zola {
 namespace {
 
 std::uint8_t luminance_u8(std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-  // Rec. 709 (same as ImageSource)
+  // Rec. 709 luminance weights.
   const double y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return static_cast<std::uint8_t>(std::lround(std::clamp(y, 0.0, 255.0)));
 }

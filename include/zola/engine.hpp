@@ -44,8 +44,7 @@ class Engine {
 public:
   explicit Engine(EngineOptions opts = {});
 
-  VoidResult show_image(const std::string& path);
-  VoidResult play_video(const std::string& path);
+  VoidResult play(const std::string& path);
 
 private:
   EngineOptions opts_;

@@ -1,6 +1,5 @@
 #include "zola/engine.hpp"
 
-#include "zola/image_source.hpp"
 #include "zola/logger.hpp"
 #include "zola/video_source.hpp"
 
@@ -106,53 +105,7 @@ void Engine::resolve_output_size(std::size_t src_w, std::size_t src_h,
   mapper_.fit_size(src_w, src_h, max_cols, fit_rows, cols, rows);
 }
 
-VoidResult Engine::show_image(const std::string& path) {
-  ImageSource source(path);
-  if (auto r = source.open(); !r) {
-    return r;
-  }
-
-  if (auto r = source.next_frame(frame_); !r) {
-    return std::unexpected(r.error());
-  }
-
-  tone_.apply(frame_);
-
-  std::size_t cols = 0;
-  std::size_t rows = 0;
-  resolve_output_size(frame_.width(), frame_.height(), cols, rows);
-  mapper_.map(frame_, cols, rows, grid_, map_color());
-
-  PresenterGuard guard(presenter_, opts_.alt_screen);
-  if (!guard.status()) {
-    return guard.status();
-  }
-
-  if (auto r = presenter_.present(grid_); !r) {
-    return r;
-  }
-
-  // Keep still image visible until Enter or Ctrl-C when on a TTY.
-  if (isatty(STDIN_FILENO)) {
-    SignalGuard signals;
-    while (!g_interrupted.load(std::memory_order_relaxed)) {
-      // Non-blocking-ish wait: short sleeps so SIGINT is noticed.
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      // Also exit if stdin has a newline (user pressed Enter).
-      fd_set fds;
-      FD_ZERO(&fds);
-      FD_SET(STDIN_FILENO, &fds);
-      timeval tv{0, 0};
-      if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &tv) > 0) {
-        break;
-      }
-    }
-  }
-
-  return {};
-}
-
-VoidResult Engine::play_video(const std::string& path) {
+VoidResult Engine::play(const std::string& path) {
   VideoSource source(path);
   if (auto r = source.open(); !r) {
     return r;
@@ -174,8 +127,49 @@ VoidResult Engine::play_video(const std::string& path) {
     return guard.status();
   }
 
-  // Audio path: open device when stream exists and not muted. Device open
-  // failure is soft — log and continue silent.
+  const bool do_color = map_color();
+
+  // Decode and present the first frame.
+  auto got = source.next_frame(frame_);
+  if (!got) {
+    return std::unexpected(got.error());
+  }
+  tone_.apply(frame_);
+  mapper_.map(frame_, cols, rows, grid_, do_color);
+  if (auto r = presenter_.present(grid_); !r) {
+    return r;
+  }
+
+  // Try a second frame. If EOF, it's a still image.
+  auto got2 = source.next_frame(frame_);
+  if (!got2 && got2.error().kind == ErrorKind::end_of_stream) {
+    if (isatty(STDIN_FILENO)) {
+      SignalGuard signals;
+      while (!g_interrupted.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        timeval tv{0, 0};
+        if (select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &tv) > 0) {
+          break;
+        }
+      }
+    }
+    return {};
+  }
+  if (!got2) {
+    return std::unexpected(got2.error());
+  }
+
+  // Video: present the second frame, then loop.
+  tone_.apply(frame_);
+  mapper_.map(frame_, cols, rows, grid_, do_color);
+  if (auto r = presenter_.present(grid_); !r) {
+    return r;
+  }
+
+  // Audio.
   AudioOutput audio;
   const bool use_audio = source.has_audio() && !opts_.mute;
   if (use_audio) {
@@ -188,7 +182,6 @@ VoidResult Engine::play_video(const std::string& path) {
 
   SignalGuard signals;
   auto next_deadline = std::chrono::steady_clock::now();
-  const bool do_color = map_color();
   const bool audio_clock = audio.is_open();
   const double sample_rate = audio_clock
                                  ? static_cast<double>(source.audio_format().sample_rate)
@@ -197,21 +190,19 @@ VoidResult Engine::play_video(const std::string& path) {
   bool paused = false;
   auto pause_start = std::chrono::steady_clock::time_point{};
   auto pause_accumulated = std::chrono::steady_clock::duration{};
-  double current_pts = 0.0;
+  double current_pts = frame_.pts();
 
   for (;;) {
     if (g_interrupted.load(std::memory_order_relaxed)) {
       break;
     }
 
-    // Key dispatch.
     const Key key = read_key();
     if (key == Key::quit) {
       break;
     }
     if (key == Key::space) {
       if (paused) {
-        // Resume.
         pause_accumulated += std::chrono::steady_clock::now() - pause_start;
         if (audio.is_open()) {
           audio.ring().clear();
@@ -220,7 +211,6 @@ VoidResult Engine::play_video(const std::string& path) {
         next_deadline = std::chrono::steady_clock::now();
         paused = false;
       } else {
-        // Pause.
         paused = true;
         pause_start = std::chrono::steady_clock::now();
         if (audio.is_open()) {
@@ -256,7 +246,6 @@ VoidResult Engine::play_video(const std::string& path) {
 
     if (use_audio) {
       if (auto pa = source.pump_audio(audio.ring()); !pa) {
-        // Audio decode failure is not fatal; keep video playing.
       }
     }
 
@@ -275,7 +264,6 @@ VoidResult Engine::play_video(const std::string& path) {
     }
     current_pts = frame_.pts();
 
-    // Master clock: audio position when playing; wall clock when muted/no audio.
     double clock_seconds = 0.0;
     if (audio_clock && sample_rate > 0.0 && channels > 0) {
       clock_seconds =
@@ -287,18 +275,15 @@ VoidResult Engine::play_video(const std::string& path) {
           std::chrono::duration<double>(effective_now.time_since_epoch()).count();
     }
 
-    // Frame PTS is in seconds from container start; compare to clock.
     const double pts_seconds = frame_.pts();
     if (audio_clock && pts_seconds > 0.0) {
       const double ahead = pts_seconds - clock_seconds;
       if (ahead > 0.0) {
         std::this_thread::sleep_for(std::chrono::duration<double>(ahead));
       } else if (-ahead > 2.0 / fps) {
-        // Video is late: skip accumulating sleep debt so we catch up.
         next_deadline = std::chrono::steady_clock::now();
       }
     } else {
-      // Wall-clock / FPS timing when no audio.
       next_deadline +=
           std::chrono::duration_cast<std::chrono::steady_clock::duration>(
               frame_duration);
@@ -306,8 +291,6 @@ VoidResult Engine::play_video(const std::string& path) {
       if (next_deadline > now) {
         std::this_thread::sleep_until(next_deadline);
       } else {
-        // Behind schedule: drop time debt so we don't spiral (skip sleep).
-        // Optionally snap deadline forward if very late.
         if (now - next_deadline > frame_duration * 3) {
           next_deadline = now;
         }

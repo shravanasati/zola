@@ -14,7 +14,6 @@ LDFLAGS  += $(FFMPEG_LIBS) -lm -pthread
 
 SRC = \
 	src/ascii_mapper.cpp \
-	src/image_source.cpp \
 	src/video_source.cpp \
 	src/presenter.cpp \
 	src/tone_map.cpp \
@@ -26,7 +25,7 @@ SRC = \
 
 OBJ = $(SRC:.cpp=.o)
 
-.PHONY: all debug clean run-image run-video test
+.PHONY: all debug clean run test
 
 all: zola
 
@@ -42,11 +41,8 @@ debug: clean
 clean:
 	rm -f $(OBJ) zola tone_map_test color_test pcm_ring_test tests/tone_map_test.o tests/color_test.o tests/pcm_ring_test.o
 
-run-image: zola
-	./zola image $(IMG)
-
-run-video: zola
-	./zola play $(VID)
+run: zola
+	./zola $(SRC)
 
 # Pure-logic tests (no TTY / FFmpeg decode / audio device required).
 test: tone_map_test color_test pcm_ring_test

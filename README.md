@@ -32,36 +32,37 @@ make
 
 ```bash
 # Still image → ASCII (fills the terminal by default)
-./zola image path/to/photo.jpg
+./zola path/to/photo.jpg
 
-# Silent video playback as ASCII
-./zola play path/to/clip.mp4
+# Local video playback as ASCII
+./zola path/to/clip.mp4
 
 # Video playback with audio (when the container has audio and a device is available)
-./zola play path/to/clip.mp4
-./zola play path/to/clip.mp4 --mute        # silent, wall-clock timing
-./zola play path/to/clip.mp4 --volume 0.5
+./zola path/to/clip.mp4
+./zola path/to/clip.mp4 --mute        # silent, wall-clock timing
+./zola path/to/clip.mp4 --volume 0.5
 
 # Optional sizing
-./zola image photo.png --cols 120 --rows 40
-./zola play clip.mp4 --fps 24
+./zola photo.png --cols 120 --rows 40
+./zola source clip.mp4 --fps 24
 
 # Brightness / tone (affects glyph density via luminance)
-./zola image photo.png --brightness 0.2
-./zola image photo.png --contrast 1.5 --gamma 0.8
-./zola play clip.mp4 --auto-levels
-./zola image photo.png --invert   # light terminal backgrounds
+./zola photo.png --brightness 0.2
+./zola photo.png --contrast 1.5 --gamma 0.8
+./zola source clip.mp4 --auto-levels
+./zola photo.png --invert   # light terminal backgrounds
 
 # URL streaming (FFmpeg handles HTTP/HTTPS transparently)
-./zola play https://example.com/video.mp4
+./zola https://example.com/image.png
+./zola https://example.com/video.mp4
 
 # YouTube / other platforms via yt-dlp (URL resolver is external)
-zola play "$(yt-dlp --get-url -f best 'https://youtube.com/watch?v=...')"
+./zola "$(yt-dlp --get-url -f best 'https://youtube.com/watch?v=...')"
 
 # Truecolor (24-bit SGR); default remains pure mono ASCII
-./zola image photo.png --color
-./zola image photo.png --color=truecolor --bg
-./zola play clip.mp4 --color=truecolor
+./zola photo.png --color
+./zola photo.png --color=truecolor --bg
+./zola clip.mp4 --color=truecolor
 ```
 
 ## Playback Controls

@@ -9,7 +9,7 @@ It renders images and plays videos as ASCII art in the terminal.
 
 **v1 MVP is complete** (black-and-white only):
 
-- [x] Still images via stb_image → grayscale Frame → ASCII
+- [x] Still images and video via FFmpeg → grayscale Frame → ASCII (URL + local)
 - [x] Silent video via FFmpeg → grayscale Frame → timed ASCII playback
 - [x] Multi-file layout under `include/zola/` + `src/`
 - [x] Makefile (`make`, `make debug`, `make clean`)
@@ -21,7 +21,7 @@ It renders images and plays videos as ASCII art in the terminal.
 ToneMap stays the luminance path for glyph choice under color; do not regress mono.
 Optional color follow-ups: ansi256/16, chroma tone, half-blocks (color slice 6).
 
-**Status: v1.1 audio is complete.**
+**Status: v1.2 URL streaming is complete.**
 
 ## Non-goals (still deferred)
 
@@ -81,14 +81,12 @@ Audio is **not** part of Frame. Do not invent AudioFrame as a Frame subclass.
 make            # release binary: ./zola
 make debug      # -O0 -g
 make clean
-make run-image IMG=path/to.png
-make run-video VID=path/to.mp4
+make run SRC=path/to.png
 ```
 
 System deps: FFmpeg development libraries (`libavformat`, `libavcodec`,
-`libswscale`, `libswresample`, `libavutil`). stb_image is vendored under
-`third_party/`. Audio device backend for v1 is decided in the audio plan
-(default: miniaudio header-only under `third_party/`).
+`libswscale`, `libswresample`, `libavutil`). Audio device backend for v1 is
+miniaudio (header-only under `third_party/`).
 
 ## Code style
 
@@ -105,8 +103,8 @@ System deps: FFmpeg development libraries (`libavformat`, `libavcodec`,
 
 - Pure logic (Mapper, glyph index, tone map) must be unit-testable without a TTY
 - File I/O tests optional; prefer small fixture assets
-- Manual smoke: `./zola image assets/sample.png` and `./zola play clip.mp4`
-- With audio: `./zola play clip.mp4` (sound on) and `./zola play clip.mp4 --mute`
+- Manual smoke: `./zola assets/sample.png` and `./zola clip.mp4`
+- With audio: `./zola clip.mp4` (sound on) and `./zola clip.mp4 --mute`
 
 ---
 
@@ -162,7 +160,7 @@ Optional follow-ups (not blocking audio):
 
 ### Goal
 
-Play container audio **in sync** with ASCII video under `./zola play`. Still
+Play container audio **in sync** with ASCII video under `./zola`. Still
 images stay silent. Default: audio **on** when a stream exists and the device
 opens. `--mute` restores today’s silent behavior. Missing audio must not fail
 playback.
@@ -286,7 +284,7 @@ regress ASCII timing or Ctrl-C restore.
 - Teardown: stop output even on error / SIGINT (RAII guard like PresenterGuard).
 - Do not touch `show_image`.
 
-**Accept:** `./zola play assets/sample.mp4` has sound when file has audio;
+**Accept:** `./zola assets/sample.mp4` has sound when file has audio;
 `--mute` silent; no-audio file still plays video.
 
 #### Slice 4 — CLI + docs
@@ -334,19 +332,19 @@ regress ASCII timing or Ctrl-C restore.
 |------|------|
 | Unit | PcmRing wrap, multi-channel frame counts, overflow drop-oldest |
 | Unit | PTS/time_base helpers if extracted pure |
-| Manual | `./zola play clip_with_audio.mp4` — audio + ASCII stay roughly in sync |
-| Manual | `./zola play clip_with_audio.mp4 --mute` — silent, same visual |
-| Manual | `./zola play video_only.mp4` — no error, silent video |
+| Manual | `./zola clip_with_audio.mp4` — audio + ASCII stay roughly in sync |
+| Manual | `./zola clip_with_audio.mp4 --mute` — silent, same visual |
+| Manual | `./zola video_only.mp4` — no error, silent video |
 | Manual | Ctrl-C mid-play — terminal restored, audio stops |
-| Regression | `./zola image …` unchanged; color/mute flags orthogonal |
+| Regression | `./zola` files unchanged; color/mute flags orthogonal |
 
 ### Acceptance (audio v1 done)
 
-- [ ] `./zola play x.mp4` plays container audio when present and device works
+- [x] `./zola x.mp4` plays container audio when present and device works
 - [ ] ASCII video remains timed; no multi-second A/V drift on short clips
-- [ ] `./zola play x.mp4 --mute` is silent (wall-clock / FPS path)
+- [x] `./zola x.mp4 --mute` is silent (wall-clock / FPS path)
 - [ ] No-audio containers and device-open failure still show video
-- [ ] `./zola image` never opens audio
+- [x] `./zola` never opens audio
 - [ ] Ctrl-C restores cursor / alt screen and stops audio
 - [ ] `make test` includes PCM ring (and any pure sync helpers)
 - [ ] Color + tone flags still work during `play` with audio
@@ -356,7 +354,7 @@ regress ASCII timing or Ctrl-C restore.
 - Seeking UI, pause keybindings, playlists
 - Windows-specific backends as first-class
 - Spatial / multi-channel beyond stereo downmix
-- Audio-only `./zola play` for music files (unless free with same path)
+- Audio-only `./zola` for music files (unless free with same path)
 - Linking Pulse/ALSA directly in addition to miniaudio
 - Karaoke / waveform visualizer in the ASCII grid
 
