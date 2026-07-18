@@ -52,11 +52,26 @@ make
 ./zola play clip.mp4 --auto-levels
 ./zola image photo.png --invert   # light terminal backgrounds
 
+# URL streaming (FFmpeg handles HTTP/HTTPS transparently)
+./zola play https://example.com/video.mp4
+
+# YouTube / other platforms via yt-dlp (URL resolver is external)
+zola play "$(yt-dlp --get-url -f best 'https://youtube.com/watch?v=...')"
+
 # Truecolor (24-bit SGR); default remains pure mono ASCII
 ./zola image photo.png --color
 ./zola image photo.png --color=truecolor --bg
 ./zola play clip.mp4 --color=truecolor
 ```
+
+## Playback Controls
+
+| Key | Action |
+|-----|--------|
+| `Space` / `Enter` | Toggle pause / resume |
+| `→` | Seek forward 5 s |
+| `←` | Seek backward 5 s |
+| `q` / `Esc` | Quit |
 
 ## Architecture
 
