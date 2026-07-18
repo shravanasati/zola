@@ -135,6 +135,12 @@ void AudioOutput::add_samples_played(std::size_t n) noexcept {
   samples_played_.fetch_add(n, std::memory_order_relaxed);
 }
 
+void AudioOutput::set_volume(float volume) noexcept {
+  if (impl_->device_initialized) {
+    ma_device_set_master_volume(&impl_->device, volume);
+  }
+}
+
 void AudioOutput::set_samples_played(std::size_t n) noexcept {
   samples_played_.store(n, std::memory_order_relaxed);
 }

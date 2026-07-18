@@ -50,6 +50,10 @@ public:
   /// clock for A/V sync when playing.
   [[nodiscard]] std::size_t samples_played() const noexcept;
 
+  /// Set the master volume factor (0 = silence, 1 = full). Safe to call
+  /// before or after start; has no effect if the device is not open.
+  void set_volume(float volume) noexcept;
+
   [[nodiscard]] PcmRing& ring() noexcept { return ring_; }
   [[nodiscard]] const PcmRing& ring() const noexcept { return ring_; }
 

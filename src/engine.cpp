@@ -176,6 +176,7 @@ VoidResult Engine::play(const std::string& path) {
     if (auto r = audio.open(source.audio_format()); !r) {
       Logger::warn("audio device unavailable, continuing silent");
     } else {
+      audio.set_volume(opts_.volume);
       audio.start();
     }
   }
